@@ -9,6 +9,7 @@ Examples for common OpenSandbox use cases. Each subdirectory contains runnable c
 - [**iflow-cli**](iflow-cli): CLI invocation template for iFlow/custom HTTP LLM services
 - [**gemini-cli**](gemini-cli): Call Google Gemini within the sandbox
 - [**codex-cli**](codex-cli): Call OpenAI/Codex-like models within the sandbox
+- [**langgraph**](langgraph): LangGraph agent orchestrating sandbox lifecycle + tools
 - [**google-adk**](google-adk): Google ADK agent calling OpenSandbox tools
 - [**desktop**](desktop): Launch VNC desktop (Xvfb + x11vnc) for VNC client connections
 - [**playwright**](playwright): Launch headless browser (Playwright + Chromium) to scrape web content
