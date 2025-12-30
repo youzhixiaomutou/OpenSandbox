@@ -16,8 +16,11 @@ package runtime
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -106,5 +109,81 @@ func TestDeleteContext_NotFound(t *testing.T) {
 	}
 	if !errors.Is(err, ErrContextNotFound) {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDeleteContext_RemovesCacheOnSuccess(t *testing.T) {
+	sessionID := "sess-123"
+
+	// mock jupyter server that accepts DELETE
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if !strings.HasSuffix(r.URL.Path, "/api/sessions/"+sessionID) {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	c := NewController(server.URL, "token")
+	c.jupyterClientMap[sessionID] = &jupyterKernel{language: Python}
+	c.defaultLanguageJupyterSessions[Python] = sessionID
+
+	if err := c.DeleteContext(sessionID); err != nil {
+		t.Fatalf("DeleteContext returned error: %v", err)
+	}
+
+	if kernel := c.getJupyterKernel(sessionID); kernel != nil {
+		t.Fatalf("expected cache to be cleared, found: %+v", kernel)
+	}
+	if _, ok := c.defaultLanguageJupyterSessions[Python]; ok {
+		t.Fatalf("expected default session entry to be removed")
+	}
+}
+
+func TestDeleteLanguageContext_RemovesCacheOnSuccess(t *testing.T) {
+	lang := Python
+	session1 := "sess-1"
+	session2 := "sess-2"
+
+	// mock jupyter server to accept two deletes
+	deleteCalls := make(map[string]int)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if strings.Contains(r.URL.Path, session1) {
+			deleteCalls[session1]++
+		} else if strings.Contains(r.URL.Path, session2) {
+			deleteCalls[session2]++
+		} else {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	c := NewController(server.URL, "token")
+	c.jupyterClientMap[session1] = &jupyterKernel{language: lang}
+	c.jupyterClientMap[session2] = &jupyterKernel{language: lang}
+	c.defaultLanguageJupyterSessions[lang] = session2
+
+	if err := c.DeleteLanguageContext(lang); err != nil {
+		t.Fatalf("DeleteLanguageContext returned error: %v", err)
+	}
+
+	if _, ok := c.jupyterClientMap[session1]; ok {
+		t.Fatalf("expected session1 removed from cache")
+	}
+	if _, ok := c.jupyterClientMap[session2]; ok {
+		t.Fatalf("expected session2 removed from cache")
+	}
+	if _, ok := c.defaultLanguageJupyterSessions[lang]; ok {
+		t.Fatalf("expected default entry removed")
+	}
+	if deleteCalls[session1] != 1 || deleteCalls[session2] != 1 {
+		t.Fatalf("unexpected delete calls: %+v", deleteCalls)
 	}
 }

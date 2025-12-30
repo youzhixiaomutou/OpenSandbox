@@ -65,15 +65,7 @@ func (c *Controller) CreateContext(req *CreateContextRequest) (string, error) {
 }
 
 func (c *Controller) DeleteContext(session string) error {
-	kernel := c.getJupyterKernel(session)
-	if kernel == nil {
-		return ErrContextNotFound
-	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	return c.jupyterClient().DeleteSession(session)
+	return c.deleteSessionAndCleanup(session)
 }
 
 func (c *Controller) ListContext(language string) ([]CodeContext, error) {
@@ -93,11 +85,36 @@ func (c *Controller) DeleteLanguageContext(language Language) error {
 		return err
 	}
 
-	client := c.jupyterClient()
+	seen := make(map[string]struct{})
 	for _, context := range contexts {
-		err := client.DeleteSession(context.ID)
-		if err != nil {
+		if _, ok := seen[context.ID]; ok {
+			continue
+		}
+		seen[context.ID] = struct{}{}
+
+		if err := c.deleteSessionAndCleanup(context.ID); err != nil {
 			return fmt.Errorf("error deleting context %s: %w", context.ID, err)
+		}
+	}
+	return nil
+}
+
+func (c *Controller) deleteSessionAndCleanup(session string) error {
+	if c.getJupyterKernel(session) == nil {
+		return ErrContextNotFound
+	}
+
+	if err := c.jupyterClient().DeleteSession(session); err != nil {
+		return err
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	delete(c.jupyterClientMap, session)
+	for lang, id := range c.defaultLanguageJupyterSessions {
+		if id == session {
+			delete(c.defaultLanguageJupyterSessions, lang)
 		}
 	}
 	return nil
